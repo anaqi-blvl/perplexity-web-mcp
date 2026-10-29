@@ -279,7 +279,14 @@ async function extractAnswer(page: Page, query: string): Promise<string> {
       );
     };
 
-    let text = readText(selectAnswerPanel(Array.from(document.querySelectorAll('[role="tabpanel"]'))));
+    // Current UI (2026-10): the streamed answer lives in a "group/final-text"
+    // partition. The [role="tabpanel"] elements are now empty tab scaffolding
+    // (Answer/Links/Images), so relying on them yields "" and burns the full
+    // timeout. Prefer final-text; keep the tabpanel heuristic as a fallback.
+    const finals = Array.from(document.querySelectorAll('[class*="group/final-text"]'));
+    let text = finals.length
+      ? readText(finals[finals.length - 1])
+      : readText(selectAnswerPanel(Array.from(document.querySelectorAll('[role="tabpanel"]'))));
 
     // Widget answers (weather, stocks, current time, ...) render outside [role=tabpanel]
     // and never show a "N sources" button. Fall back to the smallest container inside

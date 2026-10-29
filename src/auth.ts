@@ -20,7 +20,17 @@ export async function checkSession(page: Page): Promise<boolean> {
     }, AUTH_CHECK_URL);
 
     const session = response as Session;
-    return !!session?.user?.id;
+    if (session?.user?.id) return true;
+  } catch {
+    // fall through to the DOM check
+  }
+
+  // /api/auth/session returns {} even for a signed-in Pro account as of
+  // 2026-10, which made this report "No active session" on a working login and
+  // made the login tool hang for the full 5-minute poll. Treat the signed-in
+  // profile avatar as the authoritative signal instead.
+  try {
+    return (await page.locator('img[alt="Profile avatar"]').count()) > 0;
   } catch {
     return false;
   }
