@@ -36,6 +36,52 @@ export async function checkSession(page: Page): Promise<boolean> {
   }
 }
 
+export const AUTH_REQUIRED_MESSAGE =
+  "Not signed in to Perplexity. Sign in once via the noVNC window " +
+  "(http://192.168.2.67:6081/vnc.html, or http://100.98.63.36:6081/vnc.html over Tailscale), " +
+  "then retry.";
+
+/** Thrown instead of returning an empty answer when the session is signed out. */
+export class PerplexityAuthError extends Error {
+  constructor(message: string = AUTH_REQUIRED_MESSAGE) {
+    super(message);
+    this.name = "PerplexityAuthError";
+  }
+}
+
+/**
+ * Fails fast on a signed-out session.
+ *
+ * Without this, `search` opens the page, types the query, and waits out the full
+ * timeout while Perplexity renders "Sign up and repeat your request" instead of
+ * an answer — the client sees a 90s stall and an empty result rather than the
+ * one thing it needs to know. Gate before typing instead.
+ *
+ * Only throws on a *positive* signed-out signal; an unrecognised page proceeds
+ * as before, so a UI change can't silently break all searches.
+ */
+export async function assertAuthenticated(page: Page): Promise<void> {
+  try {
+    await page.locator('img[alt="Profile avatar"]').first().waitFor({ state: "visible", timeout: 6_000 });
+    return;
+  } catch {
+    // No avatar — decide whether that means signed out or just a slow/unfamiliar page.
+  }
+
+  const signedOut = await page
+    .evaluate(() => {
+      const text = document.body.innerText || "";
+      if (/sign up and repeat your request/i.test(text)) return true;
+      if (/sign in to save your history/i.test(text)) return true;
+      return Array.from(document.querySelectorAll("button, a")).some((el) =>
+        /^\s*(sign in|log in|sign up)\s*$/i.test(el.textContent || "")
+      );
+    })
+    .catch(() => false);
+
+  if (signedOut) throw new PerplexityAuthError();
+}
+
 export async function ensureAuthenticated(): Promise<void> {
   await ensureBrowser();
   const page = await getFirstPage();

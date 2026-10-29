@@ -1,5 +1,6 @@
 import type { Page } from "playwright";
 import { newSearchPage } from "./browser.js";
+import { assertAuthenticated } from "./auth.js";
 
 const PERPLEXITY_HOME = "https://www.perplexity.ai/";
 export const DEFAULT_TIMEOUT_MS = 90_000;
@@ -44,6 +45,11 @@ async function runSearch(query: string, timeoutMs: number, sources: string[] | n
     // Wait for the search input to be ready before any further interaction
     await page.locator("#ask-input").first().waitFor({ state: "visible", timeout: 10_000 });
 
+    // Gate before typing: a signed-out session renders a "Sign up and repeat your
+    // request" wall, so the search would otherwise stall for the whole timeout and
+    // come back empty. Fail in a few seconds with an actionable message instead.
+    await assertAuthenticated(page);
+
     if (sources) {
       log(`Selecting sources: [${sources.join(", ")}]...`);
       await selectSources(page, sources);
@@ -83,6 +89,10 @@ async function runSearch(query: string, timeoutMs: number, sources: string[] | n
     // it polls for any answer content (widget or text) and decides when it is done.
     log("Waiting for answer text to stabilize...");
     const answer = await waitForStableAnswer(page, query, timeoutMs);
+
+    // The session can expire while the browser is idle; if the wait timed out with
+    // nothing, re-check so the client gets "not signed in" rather than "no answer".
+    if (!answer) await assertAuthenticated(page);
 
     log("Extracting sources...");
     const citedSources = await extractSources(page);
